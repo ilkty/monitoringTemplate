@@ -1,0 +1,231 @@
+---
+title: "LDI_Equity_Monitoring"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+  
+## 1. 매크로 factors
+
+PMI  
+매크로 레벨과 심리를 신속하게 파악할 수 있는 PMI 지표의 최근 변화를 점검 - 주가 수익률과의 비교를 통해 경제-주식시장 연계성이나 괴리를 파악  
+
+
+```{r Macro_PMI, echo=FALSE, warning=FALSE}
+library(dygraphs)
+library(knitr)
+pmi <- readRDS("C:/Users/User/Documents/montoring_template/PMI.RDS")
+global_Index <- readRDS("C:/Users/User/Documents/montoring_template/Global_Index.RDS")
+#pmi_region <- pmi[,1:3]
+#pmi_countries <- pmi[,4:8]
+
+
+dygraph(pmi[,1:3], main = "제조업 PMI") %>%
+  dyRangeSelector()
+
+dygraph(pmi[,4:8], main = "제조업 국가별 PMI") %>%
+  dyRangeSelector()
+
+kable(tail(as.data.frame(pmi),5), caption = "제조업 Global PMI")
+```
+
+ESI
+Surprise 지수는 경제지표 예상치와 실제치와의 차이를 계량화 - (컨센서스 대비) 매크로 모멘텀의 약화/강화를 확인하고 주가 수익률과의 비교를 통하여 최근 시장의 매크로 반영 정도를 파악
+```{r Macro_ESI, echo=FALSE, warning=FALSE}
+library(dygraphs)
+library(knitr)
+esi <- readRDS("C:/Users/User/Documents/montoring_template/ESI.RDS")
+
+dygraph(esi, main = "Economic Surprise Index") %>%
+  dyRangeSelector()
+kable(tail(as.data.frame(esi),5), caption = "Economic Surprise Index")
+```
+
+GDP
+GDP 성장률 전망치 상향/하향 흐름 - 글로벌/DM/EM 매크로 환경이나 기대치 변화 파악
+
+```{r Macro_GDP, echo=FALSE, warning=FALSE}
+library(dygraphs)
+library(knitr)
+gdp <- readRDS("C:/Users/User/Documents/montoring_template/GDP.RDS")
+gdp <- round(gdp, 1)
+
+dygraph(gdp, main = "JPM GDP forecast") %>%
+  dyRangeSelector()
+kable(tail(as.data.frame(gdp),5), caption = "JPM GDP forecast")
+
+```
+
+
+## 2. 유동성
+
+국가별 총자산 증가와 통화량 증가로 유동성 파악
+
+```{r pressure, echo=FALSE, warning=FALSE}
+library(dygraphs); library(knitr); library(inegiR);
+lqdty <- readRDS("C:/Users/User/Documents/montoring_template/lqdty.RDS")
+
+us <- lqdty$US_FRB/1000000
+ecb <- lqdty$EU_ECB/lqdty$`EUR Curncy`/1000
+jp <- lqdty$JP_BOJ/lqdty$`JPY Curncy`/1000
+
+total_asset_chart <- cbind(us,ecb,jp)
+#yoy_total_asset <- YoY(serie, lapso, decimal = TRUE)
+yoy_total_asset <- 100*diff(log(total_asset_chart), lag=12) %>% na.omit
+
+dygraph(total_asset_chart, main = "총 자산 ($ trillion)") %>%
+  dyRangeSelector()
+
+dygraph(yoy_total_asset, main = "총 자산 변화율 (%)") %>%
+  dyRangeSelector()
+
+dygraph(lqdty[,4:5], main = "한국 중국 통화량(M2) 증가율(%)") %>%
+  dyRangeSelector()
+
+
+# kable(tail(as.data.frame(lqdty_chart),5), caption = "Liguidity ($ trillion)")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+## 3. Earnings
+
+1개월 Earnings 추정치 변화 vs 주가 수익률 : x축은 12MF EPS 변화, y축은 수익률 - 12MF PE 변화를 분해/모니터링
+
+```{r price/earnigns rotation, echo=FALSE, warning=FALSE, message=FALSE}
+library(PerformanceAnalytics); library(reshape2); library(ggplot2)
+period <- 4
+
+pe <- readRDS("C:/Users/User/Documents/montoring_template/pe.RDS")
+rtn_pe <- to.monthly(pe, OHLC = FALSE, drop.time = FALSE) %>% CalculateReturns %>% na.omit
+rcnt_rtn_pe <- tail(rtn_pe,period)
+date <- format((index(rcnt_rtn_pe)),"%y-%m")
+df_pe <- data.frame(coredata(rcnt_rtn_pe))  #date = as.Date(index(rcnt_rtn_pe), format = "%y-%m"), 
+
+
+df_rtn_pe <- 100*round(cumprod(1+df_pe[,-1]),4)
+#df_pe_date <- cbind(date,df_rtn_pe)
+df_pe_date <- cbind(date,df_rtn_pe)
+
+melted_pe <- melt(df_rtn_pe)
+set_melted_pe <- cbind(melted_pe[1:32,], melted_pe[33:64,2])
+set_melted_pe <- cbind(set_melted_pe, rep(date, 8))
+colnames(set_melted_pe) <- c("index", "eps","price","date")
+
+pe_rotation_region <- 
+              ggplot(set_melted_pe[1:8,], aes(x=eps, y=price, color=index)) + #geom_point() + 
+              geom_path(arrow = arrow(ends = "last", type = "closed", length = unit(0.1, "inches"))) +
+              theme_bw() + 
+              xlab('12MF EPS') +  
+              ylab('PRICE') +  geom_vline(xintercept=100, size=.1, color = "dark gray") + geom_hline(yintercept=100, size=.1, color = "gray")
+
+pe_rotation_region <- 
+              pe_rotation_region + geom_text(aes(label=date), colour='black', size=2.5, hjust=0, vjust=0) +
+              theme_classic()
+
+pe_rotation_countries <- 
+              ggplot(set_melted_pe[9:28,], aes(x=eps, y=price, color=index)) + #geom_point() + 
+              geom_path(arrow = arrow(ends = "last", type = "closed", length = unit(0.1, "inches"))) +
+              theme_bw() + 
+              xlab('12MF EPS') +  
+              ylab('PRICE') +  geom_vline(xintercept=100, size=.1, color = "gray") + geom_hline(yintercept=100, size=.1, color = "gray")
+
+pe_rotation_countries <- 
+              pe_rotation_countries + geom_text(aes(label=date), colour='black', size=2.5, hjust=0, vjust=0) +
+              theme_classic()
+
+
+pe_rotation_region
+pe_rotation_countries
+
+```
+
+
+## 4. Valuation
+
+## 5. Rotation
+
+a. Countries Rotation  
+
+```{r Global Index, echo=FALSE, warning=FALSE, message=FALSE}
+library(zoo); library(xts); library(PerformanceAnalytics); library(tidyr); library(ggalt); library(reshape2); library(quantmod); library(dplyr); library(knitr)
+period <- 4
+
+global_Index <- readRDS("C:/Users/User/Documents/montoring_template/Global_Index.RDS")
+rtn_index <- to.weekly(global_Index, OHLC = FALSE, drop.time = FALSE) %>% CalculateReturns %>% na.omit
+rctn_rtn_index <- tail(rtn_index,period)
+date <- format((index(rctn_rtn_index)),"%m-%d")
+
+df_index <- data.frame(coredata(rctn_rtn_index))
+bm <- df_index$MXWD.Index
+#a <- data.frame(date = as.Date(index(a), format = "%y-%m-%d"), coredata(a))
+#date <- a$date
+
+
+df_rtn_index <- round(cumprod(1+df_index),4) #[,-1]
+df_relative_rtn_index <- round(cumprod(1+(df_index-bm)),4)
+df_rtn_index_date <- cbind(date,100*df_rtn_index)
+df_rtn_index_relative <- 100*df_relative_rtn_index
+#100*df_relative_rtn_index
+
+table_price <- cbind(df_rtn_index_date,df_rtn_index_relative)[,1:8]
+melted_index <- melt(df_rtn_index_date)
+melted_relative_index <- melt(df_rtn_index_relative)
+
+price_rotation <- cbind(melted_index, melted_relative_index)[,-4]
+colnames(price_rotation) <- c("date", "index","price","relative")
+
+# melted_a <- cbind(melted_a, melted_a$return - melted_a$bm)
+# colnames(melted_a) <- c("index", "return","date","bm","relative_return")
+# cut date data
+# melted_a <- melted_a[period+1:nrow(melted_a),] %>% na.omit
+
+p.rotation_region <- 
+              ggplot(price_rotation[5:12,], aes(x=relative, y=price, color=index)) + #geom_point() + 
+              geom_path(arrow = arrow(ends = "last", type = "closed", length = unit(0.1, "inches"))) +
+              theme_bw() + 
+              xlab('relative return to BM') +  
+              ylab('momentum') +  geom_vline(xintercept=100, size=.1, color = "gray") + geom_hline(yintercept=100, size=.1, color = "gray")
+
+p.rotation_region <- 
+              p.rotation_region + geom_text(aes(label=date), colour='black', size=2.5, hjust=0, vjust=0) +
+              theme_classic()
+  
+p.rotation_countries <- 
+              ggplot(price_rotation[13:32,], aes(x=relative, y=price, color=index)) + #geom_point() + 
+              geom_path(arrow = arrow(ends = "last", type = "closed", length = unit(0.1, "inches"))) +
+              theme_bw() + 
+              xlab('relative return to BM') +  
+              ylab('momentum') +  geom_vline(xintercept=100, size=.1, color = "gray") + geom_hline(yintercept=100, size=.1, color = "gray")
+
+p.rotation_countries <- 
+              p.rotation_countries + geom_text(aes(label=date), colour='dark gray', size=2.5, hjust=0, vjust=0) +
+              theme_classic()
+
+# print charts
+p.rotation_region
+p.rotation_countries
+
+
+kable(tail(as.data.frame(table_price),5), caption = "Price Rotation")
+
+```
+
+b. Sectors Rotation
+
+## 6. Technicals
+
+## 7. Risk Monitors
+
+a. Cross assets
+
+b. Risk On/Off
+
+c. Financial stress
